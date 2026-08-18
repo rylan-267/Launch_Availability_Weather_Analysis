@@ -5,7 +5,6 @@ Compatible with Spyder IDE, Native Streamlit, and Pyodide/Browser environments.
 """
 
 import sys
-import asyncio
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -30,17 +29,18 @@ st.set_page_config(
 # 1. SOUTH AFRICAN FIRE DANGER INDEX (FDI) ENGINE
 # =============================================================================
 def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
-    """Computes South African Fire Danger Index (FDI) directly on hourly weather data."""
+    """Computes South African Fire Danger Index (FDI) matching the exact logic from reference script."""
+    # Ensure dataframe is sorted by Timestamp ascending
     df = df.sort_values(by='Timestamp').reset_index(drop=True)
-    
-    # Base FDI Calculation (FDI1)
+
+    # 1. Base FDI Calculation (FDI1)
     df['FDI1'] = (df['Temp'] - 35) - ((35 - df['Temp']) / 30) + (0.37 * (100 - df['RH'])) + 30
 
-    # Wind Correction Factor (FDI2) - Wind Speed converted to m/s
+    # 2. Wind Correction Factor (FDI2) - Wind Speed in m/s
     ws = df['WS']
     wind_add = np.select(
         [
-            ws < (3 / 3.6),
+            (ws >= 0) & (ws < (3 / 3.6)),
             (ws >= (3 / 3.6)) & (ws < (9 / 3.6)),
             (ws >= (9 / 3.6)) & (ws < (17 / 3.6)),
             (ws >= (17 / 3.6)) & (ws < (26 / 3.6)),
@@ -55,84 +55,137 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     )
     df['FDI2'] = df['FDI1'] + wind_add
 
-    # --- Corrected Event-Based Rainfall & Day Difference Tracking ---
-    rain_mask = df['Rain'] > 0.1  # Ignore negligible precipitation trace
-    
-    # Group consecutive rain hours into discrete rainfall events
-    event_id = (~rain_mask).cumsum()
-    event_totals = df[rain_mask].groupby(event_id)['Rain'].transform('sum')
-    
-    df['Rainfall_Amount'] = 0.0
-    df.loc[rain_mask, 'Rainfall_Amount'] = event_totals
-    df['Rainfall_Amount'] = df['Rainfall_Amount'].replace(0, np.nan).ffill().fillna(0)
+    # 3. Track Most Recent Prior Rainfall & Days Elapsed
+    last_rain_ts = df['Timestamp'].where(df['Rain'] > 0).shift(1).ffill()
+    last_rain_amt = df['Rain'].where(df['Rain'] > 0).shift(1).ffill().fillna(0)
 
-    # Track last rain timestamp (end of event)
-    df['last_rain_time'] = df['Timestamp'].where(rain_mask).ffill()
-    
-    # Calculate days elapsed using calendar date floor
-    time_diff = (df['Timestamp'].dt.floor('D') - df['last_rain_time'].dt.floor('D'))
-    df['Days_Since_Rainfall'] = time_diff.dt.days.fillna(21)
+    df['Days_Since_Rainfall'] = (df['Timestamp'] - last_rain_ts).dt.days.fillna(21).astype(int)
+    df['Rainfall_Amount'] = last_rain_amt
 
-    # Multiplicative Rain Decay Factor Matrix
+    # 4. Multiplicative Rain Decay Factor Matrix
+    factor = np.ones(len(df))
     r_amt = df['Rainfall_Amount']
     dsr = df['Days_Since_Rainfall']
-    factor = np.ones(len(df))
 
-    # Apply continuous rain decay bands (SA FDI official tables)
-    m = (r_amt >= 0.1) & (r_amt < 2.7)
-    factor[m & (dsr <= 1)] = 0.7
+    # Band 1: [0.0001, 2.7)
+    m = (r_amt >= 0.0001) & (r_amt < 2.7)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.7
     factor[m & (dsr == 2)] = 0.9
 
+    # Band 2: [2.7, 5.3)
     m = (r_amt >= 2.7) & (r_amt < 5.3)
-    factor[m & (dsr <= 1)] = 0.6
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.6
     factor[m & (dsr == 2)] = 0.8
     factor[m & (dsr == 3)] = 0.9
 
+    # Band 3: [5.3, 7.7)
     m = (r_amt >= 5.3) & (r_amt < 7.7)
-    factor[m & (dsr <= 1)] = 0.5
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.5
     factor[m & (dsr == 2)] = 0.7
-    factor[m & (dsr >= 3) & (dsr <= 4)] = 0.9
+    factor[m & ((dsr == 3) | (dsr == 4))] = 0.9
 
+    # Band 4: [7.7, 10.3)
     m = (r_amt >= 7.7) & (r_amt < 10.3)
-    factor[m & (dsr <= 1)] = 0.4
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.4
     factor[m & (dsr == 2)] = 0.6
     factor[m & (dsr == 3)] = 0.8
-    factor[m & (dsr >= 4) & (dsr <= 5)] = 0.9
+    factor[m & ((dsr == 4) | (dsr == 5))] = 0.9
 
+    # Band 5: [10.3, 12.9)
     m = (r_amt >= 10.3) & (r_amt < 12.9)
-    factor[m & (dsr <= 1)] = 0.4
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.4
     factor[m & (dsr == 2)] = 0.6
     factor[m & (dsr == 3)] = 0.7
     factor[m & (dsr == 4)] = 0.8
-    factor[m & (dsr >= 5) & (dsr <= 6)] = 0.9
+    factor[m & ((dsr == 5) | (dsr == 6))] = 0.9
 
+    # Band 6: [12.9, 15.4)
     m = (r_amt >= 12.9) & (r_amt < 15.4)
-    factor[m & (dsr <= 1)] = 0.3
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.3
     factor[m & (dsr == 2)] = 0.5
     factor[m & (dsr == 3)] = 0.7
-    factor[m & (dsr >= 4) & (dsr <= 5)] = 0.8
+    factor[m & ((dsr == 4) | (dsr == 5))] = 0.8
     factor[m & (dsr == 6)] = 0.9
 
-    m = (r_amt >= 15.4) & (r_amt < 25.6)
-    factor[m & (dsr <= 1)] = 0.2
+    # Band 7: [15.4, 20.6)
+    m = (r_amt >= 15.4) & (r_amt < 20.6)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.2
     factor[m & (dsr == 2)] = 0.5
     factor[m & (dsr == 3)] = 0.6
     factor[m & (dsr == 4)] = 0.7
-    factor[m & (dsr >= 5) & (dsr <= 8)] = 0.9
+    factor[m & ((dsr == 5) | (dsr == 6))] = 0.8
+    factor[m & ((dsr == 7) | (dsr == 8))] = 0.9
 
-    m = (r_amt >= 25.6)
-    factor[m & (dsr <= 1)] = 0.1
+    # Band 8: [20.6, 25.6)
+    m = (r_amt >= 20.6) & (r_amt < 25.6)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.2
+    factor[m & (dsr == 2)] = 0.4
+    factor[m & (dsr == 3)] = 0.5
+    factor[m & ((dsr == 4) | (dsr == 5))] = 0.7
+    factor[m & (dsr == 6)] = 0.8
+    factor[m & ((dsr == 7) | (dsr == 8))] = 0.9
+
+    # Band 9: [25.6, 38.5)
+    m = (r_amt >= 25.6) & (r_amt < 38.5)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.1
     factor[m & (dsr == 2)] = 0.3
     factor[m & (dsr == 3)] = 0.4
-    factor[m & (dsr >= 4) & (dsr <= 5)] = 0.6
+    factor[m & ((dsr == 4) | (dsr == 5))] = 0.6
     factor[m & (dsr == 6)] = 0.7
-    factor[m & (dsr >= 7) & (dsr <= 10)] = 0.8
+    factor[m & ((dsr == 7) | (dsr == 8))] = 0.8
+    factor[m & ((dsr == 9) | (dsr == 10))] = 0.9
+
+    # Band 10: [38.5, 51.2)
+    m = (r_amt >= 38.5) & (r_amt < 51.2)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.1
+    factor[m & (dsr == 2)] = 0.2
+    factor[m & (dsr == 3)] = 0.3
+    factor[m & (dsr == 4)] = 0.4
+    factor[m & (dsr == 5)] = 0.5
+    factor[m & (dsr == 6)] = 0.6
+    factor[m & ((dsr == 7) | (dsr == 8))] = 0.7
+    factor[m & ((dsr == 9) | (dsr == 10))] = 0.8
+    factor[m & ((dsr == 11) | (dsr == 12))] = 0.9
+
+    # Band 11: [51.2, 63.9)
+    m = (r_amt >= 51.2) & (r_amt < 63.9)
+    factor[m & ((dsr == 0) | (dsr == 1))] = 0.1
+    factor[m & (dsr == 2)] = 0.2
+    factor[m & (dsr == 3)] = 0.3
+    factor[m & (dsr == 4)] = 0.4
+    factor[m & (dsr == 5)] = 0.5
+    factor[m & (dsr == 6)] = 0.6
+    factor[m & ((dsr >= 7) & (dsr <= 10))] = 0.7
+    factor[m & ((dsr == 11) | (dsr == 12))] = 0.8
+    factor[m & ((dsr >= 13) & (dsr <= 15))] = 0.9
+
+    # Band 12: [63.9, 76.6)
+    m = (r_amt >= 63.9) & (r_amt < 76.6)
+    factor[m & ((dsr >= 0) & (dsr <= 2))] = 0.1
+    factor[m & (dsr == 3)] = 0.2
+    factor[m & (dsr == 4)] = 0.3
+    factor[m & (dsr == 5)] = 0.4
+    factor[m & (dsr == 6)] = 0.5
+    factor[m & ((dsr == 7) | (dsr == 8))] = 0.6
+    factor[m & ((dsr == 9) | (dsr == 10))] = 0.7
+    factor[m & ((dsr >= 11) & (dsr <= 15))] = 0.8
+    factor[m & ((dsr >= 16) & (dsr <= 20))] = 0.9
+
+    # Band 13: >= 76.6
+    m = r_amt >= 76.6
+    factor[m & ((dsr >= 0) & (dsr <= 3))] = 0.1
+    factor[m & (dsr == 4)] = 0.2
+    factor[m & (dsr == 5)] = 0.4
+    factor[m & ((dsr >= 6) & (dsr <= 10))] = 0.6
+    factor[m & ((dsr == 11) | (dsr == 12))] = 0.7
+    factor[m & ((dsr >= 13) & (dsr <= 15))] = 0.8
+    factor[m & ((dsr >= 16) & (dsr <= 20))] = 0.9
 
     df['FDI'] = df['FDI2'] * factor
     return df
 
 # =============================================================================
-# 2. ASYNC OPEN-METEO DATA FETCHER
+# 2. OPEN-METEO DATA FETCHER
 # =============================================================================
 @st.cache_data(ttl=86400, show_spinner="Querying Open-Meteo & Calculating FDI...")
 def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int) -> pd.DataFrame:
@@ -147,7 +200,7 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
     
     try:
         if IS_PYODIDE:
-            from pyodide.http import open_url
+            from pyodide.http import open_url  # type: ignore
             import json
             response = open_url(url)
             raw_json = json.loads(response.read())
@@ -168,7 +221,7 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
             "Cloud": data["cloud_cover"]
         })
         
-        # Calculate FDI
+        # Compute exact SA FDI
         df = compute_sa_fdi(df)
         
         df["month"] = df["Timestamp"].dt.month
@@ -222,7 +275,7 @@ def main():
 
     # Main Body
     st.title("🚀 Launch Availability Dashboard")
-    st.caption("Historical availability analysis using Open-Meteo & South African FDI.")
+    st.caption("Historical availability analysis using Open-Meteo & South African FDI Engine.")
 
     # Fetch Data
     df = fetch_weather_and_fdi(site_coords["lat"], site_coords["lon"], start_year, end_year)
@@ -314,6 +367,6 @@ if __name__ == "__main__":
                 main()
             else:
                 print("To run locally in Spyder or Terminal, use:")
-                print("streamlit run launch_analyzer.py")
+                print("streamlit run streamlit_app.py")
         except ImportError:
             main()
