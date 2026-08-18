@@ -5,7 +5,6 @@ Compatible with Spyder IDE, Native Streamlit, and Pyodide/Browser environments.
 """
 
 import sys
-import json
 import asyncio
 import numpy as np
 import pandas as pd
@@ -37,7 +36,7 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     # Base FDI Calculation (FDI1)
     df['FDI1'] = (df['Temp'] - 35) - ((35 - df['Temp']) / 30) + (0.37 * (100 - df['RH'])) + 30
 
-    # Wind Correction Factor (FDI2) - Wind Speed in m/s
+    # Wind Correction Factor (FDI2) - Wind Speed converted to m/s
     ws = df['WS']
     wind_add = np.select(
         [
@@ -56,19 +55,31 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     )
     df['FDI2'] = df['FDI1'] + wind_add
 
-    # Days Since Rain & Recent Rainfall Amount Vectorization
-    rain_mask = df['Rain'] > 0
+    # --- Corrected Event-Based Rainfall & Day Difference Tracking ---
+    rain_mask = df['Rain'] > 0.1  # Ignore negligible precipitation trace
+    
+    # Group consecutive rain hours into discrete rainfall events
+    event_id = (~rain_mask).cumsum()
+    event_totals = df[rain_mask].groupby(event_id)['Rain'].transform('sum')
+    
+    df['Rainfall_Amount'] = 0.0
+    df.loc[rain_mask, 'Rainfall_Amount'] = event_totals
+    df['Rainfall_Amount'] = df['Rainfall_Amount'].replace(0, np.nan).ffill().fillna(0)
+
+    # Track last rain timestamp (end of event)
     df['last_rain_time'] = df['Timestamp'].where(rain_mask).ffill()
-    df['Rainfall_Amount'] = df['Rain'].where(rain_mask).ffill().fillna(0)
-    df['Days_Since_Rainfall'] = (df['Timestamp'] - df['last_rain_time']).dt.days.fillna(21)
+    
+    # Calculate days elapsed using calendar date floor
+    time_diff = (df['Timestamp'].dt.floor('D') - df['last_rain_time'].dt.floor('D'))
+    df['Days_Since_Rainfall'] = time_diff.dt.days.fillna(21)
 
     # Multiplicative Rain Decay Factor Matrix
     r_amt = df['Rainfall_Amount']
     dsr = df['Days_Since_Rainfall']
     factor = np.ones(len(df))
 
-    # Apply rain decay bands according to SA FDI tables
-    m = (r_amt >= 0.0001) & (r_amt < 2.7)
+    # Apply continuous rain decay bands (SA FDI official tables)
+    m = (r_amt >= 0.1) & (r_amt < 2.7)
     factor[m & (dsr <= 1)] = 0.7
     factor[m & (dsr == 2)] = 0.9
 
@@ -102,14 +113,14 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     factor[m & (dsr >= 4) & (dsr <= 5)] = 0.8
     factor[m & (dsr == 6)] = 0.9
 
-    m = (r_amt >= 15.4) & (r_amt < 20.6)
+    m = (r_amt >= 15.4) & (r_amt < 25.6)
     factor[m & (dsr <= 1)] = 0.2
     factor[m & (dsr == 2)] = 0.5
     factor[m & (dsr == 3)] = 0.6
     factor[m & (dsr == 4)] = 0.7
     factor[m & (dsr >= 5) & (dsr <= 8)] = 0.9
 
-    m = (r_amt >= 25.6) & (r_amt < 38.5)
+    m = (r_amt >= 25.6)
     factor[m & (dsr <= 1)] = 0.1
     factor[m & (dsr == 2)] = 0.3
     factor[m & (dsr == 3)] = 0.4
@@ -123,14 +134,6 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 # 2. ASYNC OPEN-METEO DATA FETCHER
 # =============================================================================
-async def _async_fetch_pyodide(url: str) -> dict:
-    """Uses native browser async fetch API to bypass XMLHttpRequest restriction."""
-    from pyodide.http import pyfetch
-    response = await pyfetch(url)
-    if response.status != 200:
-        raise Exception(f"HTTP Error {response.status}")
-    return await response.json()
-
 @st.cache_data(ttl=86400, show_spinner="Querying Open-Meteo & Calculating FDI...")
 def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int) -> pd.DataFrame:
     """Fetches Open-Meteo historical archive data safely across desktop and browser environments."""
@@ -144,16 +147,10 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
     
     try:
         if IS_PYODIDE:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import nest_asyncio
-                    nest_asyncio.apply()
-                    raw_json = loop.run_until_complete(_async_fetch_pyodide(url))
-                else:
-                    raw_json = loop.run_until_complete(_async_fetch_pyodide(url))
-            except RuntimeError:
-                raw_json = asyncio.run(_async_fetch_pyodide(url))
+            from pyodide.http import open_url
+            import json
+            response = open_url(url)
+            raw_json = json.loads(response.read())
         else:
             res = requests.get(url, timeout=30)
             if res.status_code != 200:
