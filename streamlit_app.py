@@ -380,7 +380,7 @@ def main():
             # Heatmap Axis Fonts
             fig_map.update_xaxes(
             title_font=dict(size=16, family="Arial"),  # X-Axis Title
-            tickfont=dict(size=14),  # X-Axis Ticks (00:00, 01:00...)
+            tickfont=dict(size=13),  # X-Axis Ticks (00:00, 01:00...)
             )
             fig_map.update_yaxes(
             title_font=dict(size=16, family="Arial"),  # Y-Axis Title
