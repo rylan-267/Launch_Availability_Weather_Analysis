@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Rocket Launch Availability Dashboard & FDI Engine
-Compatible with Spyder IDE, Native Streamlit, and Pyodide/Browser environments.
+Configured for GitHub / Local File Caching (Zero API calls when data exists in /data)
 """
 
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -184,11 +185,10 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # =============================================================================
-# 2. OPEN-METEO DATA FETCHER
+# 2. DATA MANAGEMENT (LOCAL REPO CACHE -> API FALLBACK)
 # =============================================================================
-@st.cache_data(ttl=86400, show_spinner="Querying Open-Meteo & Calculating FDI...")
-def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int]:
-    """Fetches weather data and extracts UTC offset for accurate local time calculation."""
+def fetch_from_open_meteo(lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int]:
+    """Fetches data from Open-Meteo API when local file is missing."""
     url = (
         f"https://archive-api.open-meteo.com/v1/archive?"
         f"latitude={lat}&longitude={lon}&"
@@ -197,48 +197,61 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
         f"wind_speed_unit=ms&timezone=auto"
     )
     
-    try:
-        if IS_PYODIDE:
-            from pyodide.http import open_url  # type: ignore
-            import json
-            response = open_url(url)
-            raw_json = json.loads(response.read())
-        else:
-            res = requests.get(url, timeout=30)
-            if res.status_code != 200:
-                st.error(f"Open-Meteo API Error: {res.status_code}")
-                return pd.DataFrame(), 0
-            raw_json = res.json()
+    if IS_PYODIDE:
+        from pyodide.http import open_url  # type: ignore
+        import json
+        response = open_url(url)
+        raw_json = json.loads(response.read())
+    else:
+        res = requests.get(url, timeout=30)
+        if res.status_code != 200:
+            st.error(f"Open-Meteo API Error: {res.status_code}")
+            return pd.DataFrame(), 0
+        raw_json = res.json()
 
-        # Extract UTC offset in hours
-        utc_offset_seconds = raw_json.get("utc_offset_seconds", 0)
-        utc_offset_hours = int(round(utc_offset_seconds / 3600))
+    utc_offset_seconds = raw_json.get("utc_offset_seconds", 0)
+    utc_offset_hours = int(round(utc_offset_seconds / 3600))
 
-        data = raw_json["hourly"]
-        
-        # Convert local time array to standard UTC timestamps for internal calculations
-        local_ts = pd.to_datetime(data["time"])
-        utc_ts = local_ts - pd.Timedelta(seconds=utc_offset_seconds)
+    data = raw_json["hourly"]
+    local_ts = pd.to_datetime(data["time"])
+    utc_ts = local_ts - pd.Timedelta(seconds=utc_offset_seconds)
 
-        df = pd.DataFrame({
-            "Timestamp": utc_ts,
-            "Temp": data["temperature_2m"],
-            "RH": data["relative_humidity_2m"],
-            "Rain": data["precipitation"],
-            "WS": data["wind_speed_10m"],
-            "Cloud": data["cloud_cover"]
-        })
-        
-        # Compute exact SA FDI
-        df = compute_sa_fdi(df)
-        
-        df["month"] = df["Timestamp"].dt.month
-        df["hour"] = df["Timestamp"].dt.hour
-        return df, utc_offset_hours
+    df = pd.DataFrame({
+        "Timestamp": utc_ts,
+        "Temp": data["temperature_2m"],
+        "RH": data["relative_humidity_2m"],
+        "Rain": data["precipitation"],
+        "WS": data["wind_speed_10m"],
+        "Cloud": data["cloud_cover"]
+    })
+    
+    df = compute_sa_fdi(df)
+    df["utc_offset_hours"] = utc_offset_hours
+    return df, utc_offset_hours
 
-    except Exception as e:
-        st.error(f"Failed to fetch weather data: {str(e)}")
-        return pd.DataFrame(), 0
+
+@st.cache_data(ttl=86400, show_spinner="Loading Weather Data...")
+def get_site_data(site_name: str, lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int, bool]:
+    """
+    1. Checks if data file exists in local `./data/` folder.
+    2. If found, reads Parquet file directly (0 API calls).
+    3. If missing, calls Open-Meteo API and returns flag to allow user to save it.
+    """
+    os.makedirs("data", exist_ok=True)
+    
+    # Generate clean filename e.g., data/Arniston_OTR_South_Africa_2020_2025.parquet
+    clean_name = site_name.replace(" ", "_").replace("(", "").replace(")", "")
+    file_path = os.path.join("data", f"{clean_name}_{start_year}_{end_year}.parquet")
+
+    # Check Repository Cache
+    if os.path.exists(file_path):
+        df = pd.read_parquet(file_path)
+        utc_offset = int(df["utc_offset_hours"].iloc[0]) if "utc_offset_hours" in df.columns else 0
+        return df, utc_offset, True  # Loaded from Repo
+
+    # Fallback to API
+    df, utc_offset = fetch_from_open_meteo(lat, lon, start_year, end_year)
+    return df, utc_offset, False  # Loaded from API
 
 # =============================================================================
 # 3. STREAMLIT DASHBOARD INTERFACE
@@ -255,18 +268,8 @@ def main():
 
     # Sidebar Controls
     st.sidebar.title("🚀 Configuration")
-    site_options = list(SITES.keys()) + ["Custom Coordinates"]
-    selected_site = st.sidebar.selectbox("Select Launch Site", site_options)
-
-    if selected_site == "Custom Coordinates":
-        col_lat, col_lon = st.sidebar.columns(2)
-        with col_lat:
-            lat = st.number_input("Latitude (°)", min_value=-90.0, max_value=90.0, value=-34.6674, step=0.01, format="%.4f")
-        with col_lon:
-            lon = st.number_input("Longitude (°)", min_value=-180.0, max_value=180.0, value=20.2309, step=0.01, format="%.4f")
-        site_coords = {"lat": lat, "lon": lon}
-    else:
-        site_coords = SITES[selected_site]
+    selected_site = st.sidebar.selectbox("Select Launch Site", list(SITES.keys()))
+    site_coords = SITES[selected_site]
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📅 Analysis Date Range")
@@ -295,10 +298,35 @@ def main():
     st.title("🚀 Launch Availability Dashboard")
     st.caption("Historical availability analysis using Open-Meteo & South African FDI Engine.")
 
-    # Fetch Data
-    df, utc_offset_hours = fetch_weather_and_fdi(site_coords["lat"], site_coords["lon"], start_year, end_year)
+    # Load Data (Repo -> API Fallback)
+    df, utc_offset_hours, loaded_from_repo = get_site_data(
+        selected_site, site_coords["lat"], site_coords["lon"], start_year, end_year
+    )
+
+    # Status Notification Banner
+    clean_name = selected_site.replace(" ", "_").replace("(", "").replace(")", "")
+    target_filename = f"{clean_name}_{start_year}_{end_year}.parquet"
+
+    if loaded_from_repo:
+        st.success(f"📁 Loaded directly from local repository (`/data/{target_filename}`) — 0 API calls used.")
+    else:
+        st.warning(f"⚡ File `/data/{target_filename}` not found in repository. Data fetched live via Open-Meteo API.")
+        
+        # Helper to let user download file to add to /data folder in GitHub
+        if not df.empty:
+            parquet_bytes = df.to_parquet()
+            st.download_button(
+                label=f"📥 Download `{target_filename}` for GitHub `/data` folder",
+                data=parquet_bytes,
+                file_name=target_filename,
+                mime="application/octet-stream"
+            )
 
     if not df.empty:
+        # Prepare Analysis Columns
+        df["month"] = df["Timestamp"].dt.month
+        df["hour"] = df["Timestamp"].dt.hour
+
         # Apply LCC Condition
         condition = (
             (df['Rain'] <= max_precip) &
