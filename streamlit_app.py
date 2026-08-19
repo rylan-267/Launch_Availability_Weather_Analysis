@@ -536,6 +536,63 @@ def main():
 
         st.plotly_chart(fig_ws, use_container_width=True, theme="streamlit")
 
+                # =====================================================================
+        # Visualizations: Diurnal Wind Speed Profile by Month
+        # =====================================================================
+        st.markdown("---")
+        st.subheader("Average Hourly Wind Speed Profile by Month")
+
+        # 1. Group by month and hour to get mean wind speed
+        diurnal_ws = (
+            df.groupby(["month", "hour"])["WS"]
+            .mean()
+            .reset_index()
+        )
+
+        # 2. Map month numbers to names and format hours
+        month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        diurnal_ws["Month"] = diurnal_ws["month"].apply(lambda m: month_labels[m - 1])
+        diurnal_ws["Hour_Label"] = diurnal_ws["hour"].apply(lambda h: f"{h:02d}h00")
+
+        # 3. Create line plot with 12 monthly traces
+        fig_diurnal = px.line(
+            diurnal_ws,
+            x="Hour_Label",
+            y="WS",
+            color="Month",
+            labels={"Hour (UTC)": "", "WS": "Wind Speed (m/s)", "Month": "Month"},
+            category_orders={"Month": month_labels},
+            color_discrete_sequence=px.colors.qualitative.Alphabet # High-contrast 12-color palette
+        )
+
+        fig_diurnal.update_traces(line=dict(width=2))
+
+        fig_diurnal.update_yaxes(
+            title_font=dict(size=16),
+            tickfont=dict(size=13),
+            tickformat=".1f"
+        )
+
+        fig_diurnal.update_xaxes(
+            title_font=dict(size=16),
+            tickfont=dict(size=12)
+        )
+
+        fig_diurnal.update_layout(
+            height=480,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.2,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=12)
+            ),
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+
+        st.plotly_chart(fig_diurnal, use_container_width=True, theme="streamlit")
+
 # =============================================================================
 # 4. EXECUTION SWITCH
 # =============================================================================
