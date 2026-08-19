@@ -569,7 +569,7 @@ def main():
             color_discrete_sequence=colour_palette
         )
 
-        fig_diurnal.update_traces(line=dict(width=2))
+        fig_diurnal.update_traces(line=dict(width=3))
 
         fig_diurnal.update_yaxes(
             title_font=dict(size=16),
