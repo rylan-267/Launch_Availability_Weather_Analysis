@@ -556,9 +556,6 @@ def main():
 
         # 3. Create line plot with 12 monthly traces
 
-        # Sample 12 distinct colors across the Turbo or Jet continuous spectrum
-        colour_palette = px.colors.sample_colorscale("Jet", [i / 11 for i in range(12)])
-
         fig_diurnal = px.line(
             diurnal_ws,
             x="Hour (UTC)",
@@ -566,7 +563,7 @@ def main():
             color="Month",
             labels={"Hour (UTC)": "Hour (UTC)", "WS": "Wind Speed (m/s)", "Month": "Month"},
             category_orders={"Month": month_labels},
-            color_discrete_sequence=colour_palette
+           color_discrete_sequence=px.colors.qualitative.Alphabet # High-contrast 12-color palette
         )
 
         fig_diurnal.update_traces(line=dict(width=3))
