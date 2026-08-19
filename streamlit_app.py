@@ -21,23 +21,27 @@ if not IS_PYODIDE:
 # 0. STREAMLIT PAGE CONFIGURATION
 # =============================================================================
 st.set_page_config(
-    page_title="Rocket Launch Window Analyzer",
-    page_icon="🚀",
-    layout="wide"
+    page_title="Rocket Launch Window Analyzer", page_icon="🚀", layout="wide"
 )
+
 
 # =============================================================================
 # 1. SOUTH AFRICAN FIRE DANGER INDEX (FDI) ENGINE
 # =============================================================================
 def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     """Computes South African Fire Danger Index (FDI) matching exact reference logic."""
-    df = df.sort_values(by='Timestamp').reset_index(drop=True)
+    df = df.sort_values(by="Timestamp").reset_index(drop=True)
 
     # 1. Base FDI Calculation (FDI1)
-    df['FDI1'] = (df['Temp'] - 35) - ((35 - df['Temp']) / 30) + (0.37 * (100 - df['RH'])) + 30
+    df["FDI1"] = (
+        (df["Temp"] - 35)
+        - ((35 - df["Temp"]) / 30)
+        + (0.37 * (100 - df["RH"]))
+        + 30
+    )
 
     # 2. Wind Correction Factor (FDI2) - Wind Speed in m/s
-    ws = df['WS']
+    ws = df["WS"]
     wind_add = np.select(
         [
             (ws >= 0) & (ws < (3 / 3.6)),
@@ -48,24 +52,26 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
             (ws >= (33 / 3.6)) & (ws < (37 / 3.6)),
             (ws >= (37 / 3.6)) & (ws < (42 / 3.6)),
             (ws >= (42 / 3.6)) & (ws < (46 / 3.6)),
-            ws >= (46 / 3.6)
+            ws >= (46 / 3.6),
         ],
         [0, 5, 10, 15, 20, 25, 30, 35, 40],
-        default=0
+        default=0,
     )
-    df['FDI2'] = df['FDI1'] + wind_add
+    df["FDI2"] = df["FDI1"] + wind_add
 
     # 3. Track Most Recent Prior Rainfall & Days Elapsed
-    last_rain_ts = df['Timestamp'].where(df['Rain'] > 0).shift(1).ffill()
-    last_rain_amt = df['Rain'].where(df['Rain'] > 0).shift(1).ffill().fillna(0)
+    last_rain_ts = df["Timestamp"].where(df["Rain"] > 0).shift(1).ffill()
+    last_rain_amt = df["Rain"].where(df["Rain"] > 0).shift(1).ffill().fillna(0)
 
-    df['Days_Since_Rainfall'] = (df['Timestamp'] - last_rain_ts).dt.days.fillna(21).astype(int)
-    df['Rainfall_Amount'] = last_rain_amt
+    df["Days_Since_Rainfall"] = (
+        (df["Timestamp"] - last_rain_ts).dt.days.fillna(21).astype(int)
+    )
+    df["Rainfall_Amount"] = last_rain_amt
 
     # 4. Multiplicative Rain Decay Factor Matrix
     factor = np.ones(len(df))
-    r_amt = df['Rainfall_Amount']
-    dsr = df['Days_Since_Rainfall']
+    r_amt = df["Rainfall_Amount"]
+    dsr = df["Days_Since_Rainfall"]
 
     # Band 1: [0.0001, 2.7)
     m = (r_amt >= 0.0001) & (r_amt < 2.7)
@@ -181,13 +187,16 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
     factor[m & ((dsr >= 13) & (dsr <= 15))] = 0.8
     factor[m & ((dsr >= 16) & (dsr <= 20))] = 0.9
 
-    df['FDI'] = df['FDI2'] * factor
+    df["FDI"] = df["FDI2"] * factor
     return df
+
 
 # =============================================================================
 # 2. DATA MANAGEMENT (LOCAL REPO CACHE -> API FALLBACK)
 # =============================================================================
-def fetch_from_open_meteo(lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int]:
+def fetch_from_open_meteo(
+    lat: float, lon: float, start_year: int, end_year: int
+) -> tuple[pd.DataFrame, int]:
     """Fetches data from Open-Meteo API when local file is missing."""
     url = (
         f"https://archive-api.open-meteo.com/v1/archive?"
@@ -196,10 +205,11 @@ def fetch_from_open_meteo(lat: float, lon: float, start_year: int, end_year: int
         f"hourly=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,cloud_cover&"
         f"wind_speed_unit=ms&timezone=auto"
     )
-    
+
     if IS_PYODIDE:
         from pyodide.http import open_url  # type: ignore
         import json
+
         response = open_url(url)
         raw_json = json.loads(response.read())
     else:
@@ -216,42 +226,54 @@ def fetch_from_open_meteo(lat: float, lon: float, start_year: int, end_year: int
     local_ts = pd.to_datetime(data["time"])
     utc_ts = local_ts - pd.Timedelta(seconds=utc_offset_seconds)
 
-    df = pd.DataFrame({
-        "Timestamp": utc_ts,
-        "Temp": data["temperature_2m"],
-        "RH": data["relative_humidity_2m"],
-        "Rain": data["precipitation"],
-        "WS": data["wind_speed_10m"],
-        "Cloud": data["cloud_cover"]
-    })
-    
+    df = pd.DataFrame(
+        {
+            "Timestamp": utc_ts,
+            "Temp": data["temperature_2m"],
+            "RH": data["relative_humidity_2m"],
+            "Rain": data["precipitation"],
+            "WS": data["wind_speed_10m"],
+            "Cloud": data["cloud_cover"],
+        }
+    )
+
     df = compute_sa_fdi(df)
     df["utc_offset_hours"] = utc_offset_hours
     return df, utc_offset_hours
 
 
 @st.cache_data(ttl=86400, show_spinner="Loading Weather Data...")
-def get_site_data(site_name: str, lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int, bool]:
-    """
-    1. Checks if data file exists in local `./data/` folder.
-    2. If found, reads Parquet file directly (0 API calls).
-    3. If missing, calls Open-Meteo API and returns flag to allow user to save it.
+def get_site_data(
+    site_name: str, lat: float, lon: float, start_year: int, end_year: int
+) -> tuple[pd.DataFrame, int, bool]:
+    """1.
+
+    Checks if data file exists in local `./data/` folder. 2. If found, reads
+    Parquet file directly (0 API calls). 3. If missing, calls Open-Meteo API and
+    returns flag to allow user to save it.
     """
     os.makedirs("data", exist_ok=True)
-    
+
     # Generate clean filename e.g., data/Arniston_OTR_South_Africa_2020_2025.parquet
     clean_name = site_name.replace(" ", "_").replace("(", "").replace(")", "")
-    file_path = os.path.join("data", f"{clean_name}_{start_year}_{end_year}.parquet")
+    file_path = os.path.join(
+        "data", f"{clean_name}_{start_year}_{end_year}.parquet"
+    )
 
     # Check Repository Cache
     if os.path.exists(file_path):
         df = pd.read_parquet(file_path)
-        utc_offset = int(df["utc_offset_hours"].iloc[0]) if "utc_offset_hours" in df.columns else 0
+        utc_offset = (
+            int(df["utc_offset_hours"].iloc[0])
+            if "utc_offset_hours" in df.columns
+            else 0
+        )
         return df, utc_offset, True  # Loaded from Repo
 
     # Fallback to API
     df, utc_offset = fetch_from_open_meteo(lat, lon, start_year, end_year)
     return df, utc_offset, False  # Loaded from API
+
 
 # =============================================================================
 # 3. STREAMLIT DASHBOARD INTERFACE
@@ -263,22 +285,28 @@ def main():
         "Saldanha (South Africa)": {"lat": -33.0117, "lon": 17.9442},
         "Verneukpan (South Africa)": {"lat": -30.1333, "lon": 21.0667},
         "Kiruna Esrange (Sweden)": {"lat": 67.8557, "lon": 20.2251},
-        "Wallops Island (USA)": {"lat": 37.8532, "lon": -75.4741}
+        "Wallops Island (USA)": {"lat": 37.8532, "lon": -75.4741},
     }
 
     # Sidebar Controls
     st.sidebar.title("🚀 Configuration")
-    selected_site = st.sidebar.selectbox("Select Launch Site", list(SITES.keys()))
+    selected_site = st.sidebar.selectbox(
+        "Select Launch Site", list(SITES.keys())
+    )
     site_coords = SITES[selected_site]
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📅 Analysis Date Range")
-    
+
     col_start, col_end = st.sidebar.columns(2)
     with col_start:
-        start_year = st.sidebar.number_input("Start Year", min_value=2000, max_value=2025, value=2020, step=1)
+        start_year = st.sidebar.number_input(
+            "Start Year", min_value=2000, max_value=2025, value=2020, step=1
+        )
     with col_end:
-        end_year = st.sidebar.number_input("End Year", min_value=2000, max_value=2025, value=2025, step=1)
+        end_year = st.sidebar.number_input(
+            "End Year", min_value=2000, max_value=2025, value=2025, step=1
+        )
 
     if start_year > end_year:
         st.sidebar.error("Error: Start Year cannot be greater than End Year.")
@@ -287,39 +315,69 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Launch Commit Criteria (LCC)")
 
-    max_ws = st.sidebar.slider("Max Wind Speed (m/s)", 3.0, 20.0, 10.0, step=0.5)
+    max_ws = st.sidebar.slider(
+        "Max Wind Speed (m/s)", 3.0, 20.0, 10.0, step=0.5
+    )
     max_cloud = st.sidebar.slider("Max Cloud Cover (%)", 10, 100, 50, step=5)
-    max_precip = st.sidebar.number_input("Max Rain (mm/hr)", 0.0, 10.0, 0.0, step=0.2)
+    max_precip = st.sidebar.number_input(
+        "Max Rain (mm/hr)", 0.0, 10.0, 0.0, step=0.2
+    )
 
-    apply_fdi = st.sidebar.checkbox("Apply FDI Limit (South Africa)", value=True)
-    max_fdi = st.sidebar.slider("Max Fire Danger Index (FDI)", 10.0, 100.0, 46.0, step=1.0, disabled=not apply_fdi)
+    apply_fdi = st.sidebar.checkbox(
+        "Apply FDI Limit (South Africa)", value=True
+    )
+    max_fdi = st.sidebar.slider(
+        "Max Fire Danger Index (FDI)",
+        10.0,
+        100.0,
+        46.0,
+        step=1.0,
+        disabled=not apply_fdi,
+    )
 
     # Main Body
     st.title("🚀 Launch Availability Dashboard")
-    st.caption("Historical availability analysis, weather data provided by Open-Meteo under CC BY 4.0.")
+    st.caption(
+        "Historical availability analysis, weather data provided by Open-Meteo"
+        " under CC BY 4.0."
+    )
 
     # Load Data (Repo -> API Fallback)
     df, utc_offset_hours, loaded_from_repo = get_site_data(
-        selected_site, site_coords["lat"], site_coords["lon"], start_year, end_year
+        selected_site,
+        site_coords["lat"],
+        site_coords["lon"],
+        start_year,
+        end_year,
     )
 
     # Status Notification Banner
-    clean_name = selected_site.replace(" ", "_").replace("(", "").replace(")", "")
+    clean_name = (
+        selected_site.replace(" ", "_").replace("(", "").replace(")", "")
+    )
     target_filename = f"{clean_name}_{start_year}_{end_year}.parquet"
 
     if loaded_from_repo:
-        st.success(f"📁 Loaded from repository (`/data/{target_filename}`) — 0 API calls used.")
+        st.success(
+            f"📁 Loaded from repository (`/data/{target_filename}`) — 0 API"
+            " calls used."
+        )
     else:
-        st.warning(f"⚡ File `/data/{target_filename}` not found in repository. Data fetched live via Open-Meteo API.")
-        
+        st.warning(
+            f"⚡ File `/data/{target_filename}` not found in repository. Data"
+            " fetched live via Open-Meteo API."
+        )
+
         # Helper to let user download file to add to /data folder in GitHub
         if not df.empty:
             parquet_bytes = df.to_parquet()
             st.download_button(
-                label=f"📥 Download `{target_filename}` for GitHub `/data` folder",
+                label=(
+                    f"📥 Download `{target_filename}` for GitHub `/data` folder"
+                ),
                 data=parquet_bytes,
                 file_name=target_filename,
-                mime="application/octet-stream"
+                mime="application/octet-stream",
             )
 
     if not df.empty:
@@ -329,19 +387,32 @@ def main():
 
         # Apply LCC Condition
         condition = (
-            (df['Rain'] <= max_precip) &
-            (df['WS'] < max_ws) &
-            (df['Cloud'] < max_cloud)
+            (df["Rain"] <= max_precip)
+            & (df["WS"] < max_ws)
+            & (df["Cloud"] < max_cloud)
         )
-        
+
         if apply_fdi:
-            condition &= (df['FDI'] < max_fdi)
-            
-        df['is_favorable'] = condition.astype(int)
+            condition &= df["FDI"] < max_fdi
+
+        df["is_favorable"] = condition.astype(int)
 
         # Compute Metrics
-        month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        overall_availability = df['is_favorable'].mean() * 100.0
+        month_labels = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
+        overall_availability = df["is_favorable"].mean() * 100.0
 
         # Best Hours Calculation (UTC & Local)
         best_hour_utc = int(df.groupby("hour")["is_favorable"].mean().idxmax())
@@ -350,54 +421,70 @@ def main():
         # KPI Metrics Display
         col1, col2, col3 = st.columns(3)
         col1.metric("Overall Availability", f"{overall_availability:.2f}%")
-        
+
         best_month_idx = df.groupby("month")["is_favorable"].mean().idxmax()
         col2.metric("Best Month", month_labels[best_month_idx - 1])
-        
-        col3.metric("Best Launch Hour", f"{best_hour_utc:02d}:00 UTC ({best_hour_local:02d}:00 Local)")
+
+        col3.metric(
+            "Best Launch Hour",
+            f"{best_hour_utc:02d}:00 UTC ({best_hour_local:02d}:00 Local)",
+        )
 
         st.markdown("---")
 
-        # Visualizations
+        # Visualizations (Row 1: Heatmap & Ranking)
         col_map, col_rank = st.columns([2, 1])
 
         # Heatmap Matrix
-        heatmap_matrix = df.groupby(["month", "hour"])["is_favorable"].mean().unstack() * 100.0
-        heatmap_matrix.index = [month_labels[m - 1] for m in heatmap_matrix.index]
+        heatmap_matrix = (
+            df.groupby(["month", "hour"])["is_favorable"].mean().unstack()
+            * 100.0
+        )
+        heatmap_matrix.index = [
+            month_labels[m - 1] for m in heatmap_matrix.index
+        ]
 
         with col_map:
             st.subheader("Monthly vs. Hourly Availability Matrix (UTC)")
             fig_map = px.imshow(
                 heatmap_matrix,
-                labels=dict(x="Hour of Day (UTC)", y="Month", color="% Favorable"),
+                labels=dict(
+                    x="Hour of Day (UTC)", y="Month", color="% Favorable"
+                ),
                 x=[f"{h:02d}:00" for h in range(24)],
                 y=heatmap_matrix.index,
                 color_continuous_scale="Jet",
-                zmin=0, zmax=100,
-                aspect="auto"
+                zmin=0,
+                zmax=100,
+                aspect="auto",
             )
 
-            # Heatmap Axis Fonts
             fig_map.update_xaxes(
-            title_font=dict(size=16, family="Arial"),  # X-Axis Title
-            tickfont=dict(size=13),  # X-Axis Ticks (00:00, 01:00...)
+                title_font=dict(size=16), tickfont=dict(size=13)
             )
             fig_map.update_yaxes(
-            title_font=dict(size=16, family="Arial"),  # Y-Axis Title
-            tickfont=dict(size=14),  # Y-Axis Ticks (Jan, Feb...)
+                title_font=dict(size=16), tickfont=dict(size=14)
             )
             fig_map.update_coloraxes(
-            colorbar_title_font=dict(size=14),  # Colorbar Title (% Favorable)
-            colorbar_tickfont=dict(size=12),  # Colorbar Scale Ticks
+                colorbar_title_font=dict(size=14),
+                colorbar_tickfont=dict(size=12),
             )
-            fig_map.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20))
-            st.plotly_chart(fig_map, use_container_width=True)
+            fig_map.update_layout(
+                height=420, margin=dict(l=20, r=20, t=30, b=20)
+            )
+            st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
 
         with col_rank:
             st.subheader("Average Monthly Ranking")
-            monthly_ranking = (df.groupby("month")["is_favorable"].mean() * 100.0).reset_index()
-            monthly_ranking["Month"] = monthly_ranking["month"].apply(lambda m: month_labels[m - 1])
-            monthly_ranking = monthly_ranking.sort_values(by="is_favorable", ascending=True)
+            monthly_ranking = (
+                df.groupby("month")["is_favorable"].mean() * 100.0
+            ).reset_index()
+            monthly_ranking["Month"] = monthly_ranking["month"].apply(
+                lambda m: month_labels[m - 1]
+            )
+            monthly_ranking = monthly_ranking.sort_values(
+                by="is_favorable", ascending=True
+            )
 
             fig_bar = px.bar(
                 monthly_ranking,
@@ -406,17 +493,14 @@ def main():
                 orientation="h",
                 labels={"is_favorable": "% Availability", "Month": ""},
                 color="is_favorable",
-                color_continuous_scale="Jet"
+                color_continuous_scale="Jet",
             )
 
-            # Bar Chart Axis Fonts
             fig_bar.update_xaxes(
-                title_font=dict(size=16, family="Arial"),  # X-Axis Title
-                tickfont=dict(size=14),  # X-Axis Ticks (0, 20, 40...)
+                title_font=dict(size=16), tickfont=dict(size=14)
             )
             fig_bar.update_yaxes(
-                title_font=dict(size=16, family="Arial"),  # Y-Axis Title
-                tickfont=dict(size=14),  # Y-Axis Ticks (Jan, Feb...)
+                title_font=dict(size=16), tickfont=dict(size=14)
             )
             fig_bar.update_layout(
                 height=420,
@@ -424,8 +508,64 @@ def main():
                 coloraxis_showscale=False,
                 margin=dict(l=10, r=10, t=30, b=20),
             )
-            fig_bar.update_layout(height=420, showlegend=False, coloraxis_showscale=False, margin=dict(l=10, r=10, t=30, b=20))
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True, theme="streamlit")
+
+        # Visualizations (Row 2: Timeline Trend below Heatmap & Ranking)
+        st.markdown("---")
+        st.subheader("📈 Monthly Availability Timeline")
+
+        monthly_trend = (
+            df.groupby(pd.Grouper(key="Timestamp", freq="MS"))["is_favorable"]
+            .mean()
+            .reset_index()
+        )
+        monthly_trend["availability_pct"] = (
+            monthly_trend["is_favorable"] * 100.0
+        )
+
+        fig_line = px.line(
+            monthly_trend,
+            x="Timestamp",
+            y="availability_pct",
+            labels={"Timestamp": "", "availability_pct": "% of Total Hours"},
+        )
+
+        fig_line.update_traces(
+            name=selected_site,
+            showlegend=True,
+            line=dict(width=2.5, color="#E66C23"),
+        )
+
+        fig_line.update_yaxes(
+            range=[0, 100],
+            title_font=dict(size=16),
+            tickfont=dict(size=13),
+            tickformat=".1f",
+        )
+
+        fig_line.update_xaxes(
+            title_font=dict(size=16),
+            tickfont=dict(size=13),
+            dtick="M12",
+            tickformat="%Y",
+        )
+
+        fig_line.update_layout(
+            height=380,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.25,
+                xanchor="center",
+                x=0.5,
+                title="",
+                font=dict(size=14),
+            ),
+            margin=dict(l=20, r=20, t=20, b=20),
+        )
+
+        st.plotly_chart(fig_line, use_container_width=True, theme="streamlit")
+
 
 # =============================================================================
 # 4. EXECUTION SWITCH
@@ -436,6 +576,7 @@ if __name__ == "__main__":
     else:
         try:
             from streamlit.runtime.scriptrunner import get_script_run_ctx
+
             if get_script_run_ctx() is not None:
                 main()
             else:
