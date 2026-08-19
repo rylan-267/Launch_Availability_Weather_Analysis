@@ -475,7 +475,7 @@ def main():
 
         st.plotly_chart(fig_line, use_container_width=True, theme="streamlit")
 
-# =====================================================================
+        # =====================================================================
         # Visualizations (Row 3: Monthly Average Wind Speed Timeline)
         # =====================================================================
         st.markdown("---")
@@ -536,7 +536,7 @@ def main():
 
         st.plotly_chart(fig_ws, use_container_width=True, theme="streamlit")
 
-                # =====================================================================
+        # =====================================================================
         # Visualizations: Diurnal Wind Speed Profile by Month
         # =====================================================================
         st.markdown("---")
