@@ -296,7 +296,7 @@ def main():
 
     # Main Body
     st.title("🚀 Launch Availability Dashboard")
-    st.caption("Historical availability analysis using Open-Meteo & South African FDI Engine.")
+    st.caption("Historical availability analysis, weather data provided by Open-Meteo under CC BY 4.0.")
 
     # Load Data (Repo -> API Fallback)
     df, utc_offset_hours, loaded_from_repo = get_site_data(
@@ -308,7 +308,7 @@ def main():
     target_filename = f"{clean_name}_{start_year}_{end_year}.parquet"
 
     if loaded_from_repo:
-        st.success(f"📁 Loaded directly from local repository (`/data/{target_filename}`) — 0 API calls used.")
+        st.success(f"📁 Loaded from repository (`/data/{target_filename}`) — 0 API calls used.")
     else:
         st.warning(f"⚡ File `/data/{target_filename}` not found in repository. Data fetched live via Open-Meteo API.")
         
@@ -376,6 +376,20 @@ def main():
                 zmin=0, zmax=100,
                 aspect="auto"
             )
+
+            # Heatmap Axis Fonts
+            fig_map.update_xaxes(
+            title_font=dict(size=16, family="Arial", color="black"),  # X-Axis Title
+            tickfont=dict(size=13),  # X-Axis Ticks (00:00, 01:00...)
+            )
+            fig_map.update_yaxes(
+            title_font=dict(size=16, family="Arial", color="black"),  # Y-Axis Title
+            tickfont=dict(size=13),  # Y-Axis Ticks (Jan, Feb...)
+            )
+            fig_map.update_coloraxes(
+            colorbar_title_font=dict(size=14),  # Colorbar Title (% Favorable)
+            colorbar_tickfont=dict(size=12),  # Colorbar Scale Ticks
+            )
             fig_map.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20))
             st.plotly_chart(fig_map, use_container_width=True)
 
@@ -393,6 +407,22 @@ def main():
                 labels={"is_favorable": "% Availability", "Month": ""},
                 color="is_favorable",
                 color_continuous_scale="Jet"
+            )
+
+            # Bar Chart Axis Fonts
+            fig_bar.update_xaxes(
+                title_font=dict(size=16, family="Arial", color="black"),  # X-Axis Title
+                tickfont=dict(size=13),  # X-Axis Ticks (0, 20, 40...)
+            )
+            fig_bar.update_yaxes(
+                title_font=dict(size=16, family="Arial", color="black"),  # Y-Axis Title
+                tickfont=dict(size=13),  # Y-Axis Ticks (Jan, Feb...)
+            )
+            fig_bar.update_layout(
+                height=420,
+                showlegend=False,
+                coloraxis_showscale=False,
+                margin=dict(l=10, r=10, t=30, b=20),
             )
             fig_bar.update_layout(height=420, showlegend=False, coloraxis_showscale=False, margin=dict(l=10, r=10, t=30, b=20))
             st.plotly_chart(fig_bar, use_container_width=True)
