@@ -552,12 +552,12 @@ def main():
         # 2. Map month numbers to names and format hours
         month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         diurnal_ws["Month"] = diurnal_ws["month"].apply(lambda m: month_labels[m - 1])
-        diurnal_ws["Hour_Label"] = diurnal_ws["hour"].apply(lambda h: f"{h:02d}h00")
+        diurnal_ws["Hour (UTC)"] = diurnal_ws["hour"].apply(lambda h: f"{h:02d}h00")
 
         # 3. Create line plot with 12 monthly traces
         fig_diurnal = px.line(
             diurnal_ws,
-            x="Hour_Label",
+            x="Hour (UTC)",
             y="WS",
             color="Month",
             labels={"Hour (UTC)": "", "WS": "Wind Speed (m/s)", "Month": "Month"},
