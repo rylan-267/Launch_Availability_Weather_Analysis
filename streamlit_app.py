@@ -475,6 +475,67 @@ def main():
 
         st.plotly_chart(fig_line, use_container_width=True, theme="streamlit")
 
+# =====================================================================
+        # Visualizations (Row 3: Monthly Average Wind Speed Timeline)
+        # =====================================================================
+        st.markdown("---")
+        st.subheader("💨 Monthly Average Wind Speed Timeline")
+
+        # Group by Month-Start and calculate monthly mean wind speed
+        ws_monthly = (
+            df.groupby(pd.Grouper(key="Timestamp", freq="MS"))
+            .agg(
+                avg_ws=("WS", "mean"),
+                hour_count=("WS", "count")
+            )
+            .reset_index()
+        )
+
+        # Filter out partial boundary months (< 500 hours)
+        ws_monthly = ws_monthly[ws_monthly["hour_count"] >= 500]
+
+        fig_ws = px.line(
+            ws_monthly,
+            x="Timestamp",
+            y="avg_ws",
+            labels={"Timestamp": "", "avg_ws": "Avg Wind Speed (m/s)"}
+        )
+
+        fig_ws.update_traces(
+            name=selected_site,
+            showlegend=True,
+            line=dict(width=2.5, color="dodgerblue")
+        )
+
+        fig_ws.update_yaxes(
+            title_font=dict(size=16),
+            tickfont=dict(size=13),
+            tickformat=".1f"
+        )
+
+        fig_ws.update_xaxes(
+            title_font=dict(size=16),
+            tickfont=dict(size=13),
+            dtick="M12",
+            tickformat="%Y"
+        )
+
+        fig_ws.update_layout(
+            height=380,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.25,
+                xanchor="center",
+                x=0.5,
+                title="",
+                font=dict(size=14)
+            ),
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+
+        st.plotly_chart(fig_ws, use_container_width=True, theme="streamlit")
+
 # =============================================================================
 # 4. EXECUTION SWITCH
 # =============================================================================
