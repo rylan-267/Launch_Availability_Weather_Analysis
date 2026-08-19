@@ -562,7 +562,7 @@ def main():
             color="Month",
             labels={"Hour (UTC)": "Hour (UTC)", "WS": "Wind Speed (m/s)", "Month": "Month"},
             category_orders={"Month": month_labels},
-            color_discrete_sequence=px.colors.qualitative.Alphabet # High-contrast 12-color palette
+            color_discrete_sequence=px.colors.qualitative.Set3 # High-contrast 12-color palette
         )
 
         fig_diurnal.update_traces(line=dict(width=2))
