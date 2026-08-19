@@ -380,11 +380,11 @@ def main():
             # Heatmap Axis Fonts
             fig_map.update_xaxes(
             title_font=dict(size=16, family="Arial", color="black"),  # X-Axis Title
-            tickfont=dict(size=13),  # X-Axis Ticks (00:00, 01:00...)
+            tickfont=dict(size=14),  # X-Axis Ticks (00:00, 01:00...)
             )
             fig_map.update_yaxes(
             title_font=dict(size=16, family="Arial", color="black"),  # Y-Axis Title
-            tickfont=dict(size=13),  # Y-Axis Ticks (Jan, Feb...)
+            tickfont=dict(size=14),  # Y-Axis Ticks (Jan, Feb...)
             )
             fig_map.update_coloraxes(
             colorbar_title_font=dict(size=14),  # Colorbar Title (% Favorable)
@@ -412,11 +412,11 @@ def main():
             # Bar Chart Axis Fonts
             fig_bar.update_xaxes(
                 title_font=dict(size=16, family="Arial", color="black"),  # X-Axis Title
-                tickfont=dict(size=13),  # X-Axis Ticks (0, 20, 40...)
+                tickfont=dict(size=14),  # X-Axis Ticks (0, 20, 40...)
             )
             fig_bar.update_yaxes(
                 title_font=dict(size=16, family="Arial", color="black"),  # Y-Axis Title
-                tickfont=dict(size=13),  # Y-Axis Ticks (Jan, Feb...)
+                tickfont=dict(size=14),  # Y-Axis Ticks (Jan, Feb...)
             )
             fig_bar.update_layout(
                 height=420,
