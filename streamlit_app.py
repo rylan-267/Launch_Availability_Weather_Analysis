@@ -437,7 +437,7 @@ def main():
             monthly_trend,
             x="Timestamp",
             y="availability_pct",
-            labels={"Timestamp": "", "availability_pct": "% of Total Hours"}
+            labels={"Timestamp": "", "availability_pct": "% Availability"}
         )
 
         fig_line.update_traces(
