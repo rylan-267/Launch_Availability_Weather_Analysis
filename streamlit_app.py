@@ -258,14 +258,13 @@ def get_site_data(site_name: str, lat: float, lon: float, start_year: int, end_y
 # =============================================================================
 def main():
     SITES = {
-        "Arniston OTR (South Africa)": {"lat": -34.6674, "lon": 20.2309},
-        "Richards Bay (South Africa)": {"lat": -28.783, "lon": 32.0377},
-        "Saldanha (South Africa)": {"lat": -33.0117, "lon": 17.9442},
-        "Verneukpan (South Africa)": {"lat": -30.1333, "lon": 21.0667},
-        "Kiruna Esrange (Sweden)": {"lat": 67.8557, "lon": 20.2251},
-        "Wallops Island (USA)": {"lat": 37.8532, "lon": -75.4741}
+        "🇿🇦 Arniston OTR (South Africa)": {"lat": -34.6674, "lon": 20.2309},
+        "🇿🇦 Richards Bay (South Africa)": {"lat": -28.783, "lon": 32.0377},
+        "🇿🇦 Saldanha (South Africa)": {"lat": -33.0117, "lon": 17.9442},
+        "🇿🇦 Verneukpan (South Africa)": {"lat": -30.1333, "lon": 21.0667},
+        "🇸🇪 Kiruna Esrange (Sweden)": {"lat": 67.8557, "lon": 20.2251},
+        "🇺🇸 Wallops Island (USA)": {"lat": 37.8532, "lon": -75.4741}
     }
-
     # Sidebar Controls
     st.sidebar.title("🚀 Configuration")
     selected_site = st.sidebar.selectbox("Select Launch Site", list(SITES.keys()))
