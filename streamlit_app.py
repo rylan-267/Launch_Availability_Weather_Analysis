@@ -29,8 +29,7 @@ st.set_page_config(
 # 1. SOUTH AFRICAN FIRE DANGER INDEX (FDI) ENGINE
 # =============================================================================
 def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
-    """Computes South African Fire Danger Index (FDI) matching the exact logic from reference script."""
-    # Ensure dataframe is sorted by Timestamp ascending
+    """Computes South African Fire Danger Index (FDI) matching exact reference logic."""
     df = df.sort_values(by='Timestamp').reset_index(drop=True)
 
     # 1. Base FDI Calculation (FDI1)
@@ -188,14 +187,14 @@ def compute_sa_fdi(df: pd.DataFrame) -> pd.DataFrame:
 # 2. OPEN-METEO DATA FETCHER
 # =============================================================================
 @st.cache_data(ttl=86400, show_spinner="Querying Open-Meteo & Calculating FDI...")
-def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int) -> pd.DataFrame:
-    """Fetches Open-Meteo historical archive data safely across desktop and browser environments."""
+def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int) -> tuple[pd.DataFrame, int]:
+    """Fetches weather data and extracts UTC offset for accurate local time calculation."""
     url = (
         f"https://archive-api.open-meteo.com/v1/archive?"
         f"latitude={lat}&longitude={lon}&"
         f"start_date={start_year}-01-01&end_date={end_year}-12-31&"
         f"hourly=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,cloud_cover&"
-        f"wind_speed_unit=ms&timezone=UTC"
+        f"wind_speed_unit=ms&timezone=auto"
     )
     
     try:
@@ -208,12 +207,21 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
             res = requests.get(url, timeout=30)
             if res.status_code != 200:
                 st.error(f"Open-Meteo API Error: {res.status_code}")
-                return pd.DataFrame()
+                return pd.DataFrame(), 0
             raw_json = res.json()
 
+        # Extract UTC offset in hours
+        utc_offset_seconds = raw_json.get("utc_offset_seconds", 0)
+        utc_offset_hours = int(round(utc_offset_seconds / 3600))
+
         data = raw_json["hourly"]
+        
+        # Convert local time array to standard UTC timestamps for internal calculations
+        local_ts = pd.to_datetime(data["time"])
+        utc_ts = local_ts - pd.Timedelta(seconds=utc_offset_seconds)
+
         df = pd.DataFrame({
-            "Timestamp": pd.to_datetime(data["time"]),
+            "Timestamp": utc_ts,
             "Temp": data["temperature_2m"],
             "RH": data["relative_humidity_2m"],
             "Rain": data["precipitation"],
@@ -226,11 +234,11 @@ def fetch_weather_and_fdi(lat: float, lon: float, start_year: int, end_year: int
         
         df["month"] = df["Timestamp"].dt.month
         df["hour"] = df["Timestamp"].dt.hour
-        return df
+        return df, utc_offset_hours
 
     except Exception as e:
         st.error(f"Failed to fetch weather data: {str(e)}")
-        return pd.DataFrame()
+        return pd.DataFrame(), 0
 
 # =============================================================================
 # 3. STREAMLIT DASHBOARD INTERFACE
@@ -247,17 +255,27 @@ def main():
 
     # Sidebar Controls
     st.sidebar.title("🚀 Configuration")
-    selected_site = st.sidebar.selectbox("Select Launch Site", list(SITES.keys()))
-    site_coords = SITES[selected_site]
+    site_options = list(SITES.keys()) + ["Custom Coordinates"]
+    selected_site = st.sidebar.selectbox("Select Launch Site", site_options)
+
+    if selected_site == "Custom Coordinates":
+        col_lat, col_lon = st.sidebar.columns(2)
+        with col_lat:
+            lat = st.number_input("Latitude (°)", min_value=-90.0, max_value=90.0, value=-34.6674, step=0.01, format="%.4f")
+        with col_lon:
+            lon = st.number_input("Longitude (°)", min_value=-180.0, max_value=180.0, value=20.2309, step=0.01, format="%.4f")
+        site_coords = {"lat": lat, "lon": lon}
+    else:
+        site_coords = SITES[selected_site]
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📅 Analysis Date Range")
     
     col_start, col_end = st.sidebar.columns(2)
     with col_start:
-        start_year = st.number_input("Start Year", min_value=2000, max_value=2025, value=2020, step=1)
+        start_year = st.sidebar.number_input("Start Year", min_value=2000, max_value=2025, value=2020, step=1)
     with col_end:
-        end_year = st.number_input("End Year", min_value=2000, max_value=2025, value=2025, step=1)
+        end_year = st.sidebar.number_input("End Year", min_value=2000, max_value=2025, value=2025, step=1)
 
     if start_year > end_year:
         st.sidebar.error("Error: Start Year cannot be greater than End Year.")
@@ -278,7 +296,7 @@ def main():
     st.caption("Historical availability analysis using Open-Meteo & South African FDI Engine.")
 
     # Fetch Data
-    df = fetch_weather_and_fdi(site_coords["lat"], site_coords["lon"], start_year, end_year)
+    df, utc_offset_hours = fetch_weather_and_fdi(site_coords["lat"], site_coords["lon"], start_year, end_year)
 
     if not df.empty:
         # Apply LCC Condition
@@ -297,6 +315,10 @@ def main():
         month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         overall_availability = df['is_favorable'].mean() * 100.0
 
+        # Best Hours Calculation (UTC & Local)
+        best_hour_utc = int(df.groupby("hour")["is_favorable"].mean().idxmax())
+        best_hour_local = int((best_hour_utc + utc_offset_hours) % 24)
+
         # KPI Metrics Display
         col1, col2, col3 = st.columns(3)
         col1.metric("Overall Availability", f"{overall_availability:.2f}%")
@@ -304,8 +326,7 @@ def main():
         best_month_idx = df.groupby("month")["is_favorable"].mean().idxmax()
         col2.metric("Best Month", month_labels[best_month_idx - 1])
         
-        best_hour_utc = df.groupby("hour")["is_favorable"].mean().idxmax()
-        col3.metric("Best UTC Launch Hour", f"{best_hour_utc:02d}:00 UTC")
+        col3.metric("Best Launch Hour", f"{best_hour_utc:02d}:00 UTC ({best_hour_local:02d}:00 Local)")
 
         st.markdown("---")
 
@@ -317,7 +338,7 @@ def main():
         heatmap_matrix.index = [month_labels[m - 1] for m in heatmap_matrix.index]
 
         with col_map:
-            st.subheader("Monthly vs. Hourly Availability Matrix")
+            st.subheader("Monthly vs. Hourly Availability Matrix (UTC)")
             fig_map = px.imshow(
                 heatmap_matrix,
                 labels=dict(x="Hour of Day (UTC)", y="Month", color="% Favorable"),
@@ -347,12 +368,6 @@ def main():
             )
             fig_bar.update_layout(height=420, showlegend=False, coloraxis_showscale=False, margin=dict(l=10, r=10, t=30, b=20))
             st.plotly_chart(fig_bar, use_container_width=True)
-
-        # Table Expander
-        with st.expander("🔍 Detailed Raw Weather & FDI Metrics"):
-            summary_table = df.groupby("month")[["Temp", "WS", "Rain", "Cloud", "FDI"]].mean()
-            summary_table.index = month_labels
-            st.dataframe(summary_table.style.format("{:.2f}"), use_container_width=True)
 
 # =============================================================================
 # 4. EXECUTION SWITCH
