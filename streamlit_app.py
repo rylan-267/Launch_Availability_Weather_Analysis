@@ -479,7 +479,7 @@ def main():
         # Visualizations (Row 3: Monthly Average Wind Speed Timeline)
         # =====================================================================
         st.markdown("---")
-        st.subheader("💨 Monthly Average Wind Speed Timeline")
+        st.subheader("Monthly Average Wind Speed Timeline")
 
         # Group by Month-Start and calculate monthly mean wind speed
         ws_monthly = (
