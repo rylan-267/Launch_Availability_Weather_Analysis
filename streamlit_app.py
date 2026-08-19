@@ -540,7 +540,7 @@ def main():
         # Visualizations: Diurnal Wind Speed Profile by Month
         # =====================================================================
         st.markdown("---")
-        st.subheader("Average Hourly Wind Speed Profile by Month")
+        st.subheader("Average Hourly Wind Speed Profile by Month (Toggle Months On/Off in Legend)")
 
         # 1. Group by month and hour to get mean wind speed
         diurnal_ws = (
